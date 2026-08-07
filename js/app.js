@@ -677,7 +677,9 @@ function selectFood(food) {
 function clearFoodSelection() {
   state.selectedFood = null;
   document.getElementById("foodSearch").value = "";
-  document.getElementById("qtyInput").value = "";
+  const qty = document.getElementById("qtyInput");
+  qty.value = "0";
+  qty.defaultValue = "0";
   document.getElementById("portionHint").value = "";
   document.getElementById("selectedFoodLabel").textContent = "Nenhum alimento selecionado.";
   closeSuggestions("suggestions");
