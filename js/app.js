@@ -537,10 +537,29 @@ function renderQuickChips() {
     parts.join("") || `<span class="muted">Marque favoritos na aba Banco para acesso rápido.</span>`;
 }
 
+const MIN_SUGGESTIONS_HEIGHT = 180;
+const VIEWPORT_MARGIN = 10;
+
+function sizeSuggestions(box) {
+  const anchor = box.closest(".search-wrap");
+  if (!anchor) return;
+
+  const rect = anchor.getBoundingClientRect();
+  const viewport = window.visualViewport?.height ?? window.innerHeight;
+  const below = viewport - rect.bottom - VIEWPORT_MARGIN;
+  const above = rect.top - VIEWPORT_MARGIN;
+  const openUp = below < MIN_SUGGESTIONS_HEIGHT && above > below;
+
+  box.classList.toggle("up", openUp);
+  box.style.maxHeight = `${Math.max(openUp ? above : below, MIN_SUGGESTIONS_HEIGHT)}px`;
+}
+
 function closeSuggestions(box) {
   const el = typeof box === "string" ? document.getElementById(box) : box;
   if (!el) return;
   el.classList.add("hidden");
+  el.classList.remove("up");
+  el.style.maxHeight = "";
   el.innerHTML = "";
   el.closest(".panel")?.classList.remove("raised");
 }
@@ -548,6 +567,11 @@ function closeSuggestions(box) {
 function openSuggestions(box) {
   box.classList.remove("hidden");
   box.closest(".panel")?.classList.add("raised");
+  sizeSuggestions(box);
+}
+
+function resizeOpenSuggestions() {
+  document.querySelectorAll(".suggestions:not(.hidden)").forEach(sizeSuggestions);
 }
 
 function renderSuggestions(query, boxId, onPickAttr) {
@@ -560,7 +584,7 @@ function renderSuggestions(query, boxId, onPickAttr) {
   const hits = state.foods
     .filter((f) => matchesSearch(f.name, q))
     .sort((a, b) => Number(b.favorite) - Number(a.favorite) || a.name.length - b.name.length)
-    .slice(0, 40);
+    .slice(0, 200);
   if (!hits.length) {
     closeSuggestions(box);
     return;
@@ -1292,6 +1316,10 @@ function bindEvents() {
     closeSuggestions("suggestions");
     closeSuggestions("groupSuggestions");
   });
+
+  window.addEventListener("resize", resizeOpenSuggestions);
+  window.addEventListener("scroll", resizeOpenSuggestions, { passive: true });
+  window.visualViewport?.addEventListener("resize", resizeOpenSuggestions);
 }
 
 async function init() {
