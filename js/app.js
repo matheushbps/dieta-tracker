@@ -268,37 +268,120 @@ function rebuildFoods() {
   state.foods = [...byName.values()];
 }
 
-function loadState() {
+const LEGACY_KEYS = ["dieta-tracker-v1"];
+
+function readStore(key) {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem("dieta-tracker-v1");
-    const data = JSON.parse(raw || "null");
-    if (!data) return;
-
-    const loadedFoods = Array.isArray(data.foods) ? data.foods.map(normalizeFood) : [];
-    state.favorites = data.favorites && typeof data.favorites === "object" ? { ...data.favorites } : {};
-    state.hiddenIds = data.hiddenIds && typeof data.hiddenIds === "object" ? { ...data.hiddenIds } : {};
-
-    for (const food of loadedFoods) {
-      if (food.favorite) state.favorites[food.id] = true;
-    }
-
-    // Persistência local: só personalizados (não o banco da nuvem)
-    const customs = Array.isArray(data.customFoods)
-      ? data.customFoods.map(normalizeFood)
-      : loadedFoods.filter((f) => !["cloud", "seed", "legacy"].includes(f.source));
-
-    // Se o usuário tinha importado o CSV inteiro localmente, descarta para não estourar quota
-    state.customFoods =
-      customs.length > 1500
-        ? customs.filter((f) => f.source === "manual" || f.favorite || state.favorites[f.id])
-        : customs;
-
-    state.days = data.days && typeof data.days === "object" ? data.days : {};
-    state.groups = Array.isArray(data.groups) ? data.groups : [];
-    state.goals = normalizeGoals(data.goals || {});
+    return JSON.parse(localStorage.getItem(key) || "null");
   } catch {
-    /* storage corrompido: começa limpo */
+    return null;
   }
+}
+
+function mergeDays(target, incoming) {
+  if (!incoming || typeof incoming !== "object") return target;
+  for (const [date, entries] of Object.entries(incoming)) {
+    if (!Array.isArray(entries)) continue;
+    const current = target[date] || [];
+    const seen = new Set(current.map((e) => e.id));
+    for (const entry of entries) {
+      if (!entry || seen.has(entry.id)) continue;
+      current.push(entry);
+      seen.add(entry.id);
+    }
+    target[date] = current;
+  }
+  return target;
+}
+
+function mergeGroups(target, incoming) {
+  if (!Array.isArray(incoming)) return target;
+  const byId = new Map(target.map((g) => [g.id, g]));
+  const byName = new Map(target.map((g) => [String(g.name || "").toLowerCase(), g]));
+  for (const group of incoming) {
+    if (!group || byId.has(group.id)) continue;
+    const nameKey = String(group.name || "").toLowerCase();
+    if (byName.has(nameKey)) continue;
+    target.push(group);
+    byId.set(group.id, group);
+    byName.set(nameKey, group);
+  }
+  return target;
+}
+
+function mergeCustomFoods(target, incoming) {
+  const byName = new Map(target.map((f) => [f.name.toLowerCase(), f]));
+  for (const raw of incoming) {
+    const food = normalizeFood(raw);
+    if (!food.name) continue;
+    const key = food.name.toLowerCase();
+    const existing = byName.get(key);
+    if (!existing) {
+      target.push(food);
+      byName.set(key, food);
+      continue;
+    }
+    // União: preserva edições manuais e favoritos já existentes
+    Object.assign(existing, {
+      ...food,
+      ...existing,
+      favorite: existing.favorite || food.favorite,
+      source: existing.source === "manual" || food.source === "manual" ? "manual" : existing.source,
+    });
+  }
+  return target;
+}
+
+function applySnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return;
+
+  const loadedFoods = Array.isArray(snapshot.foods) ? snapshot.foods.map(normalizeFood) : [];
+  for (const food of loadedFoods) {
+    if (food.favorite) state.favorites[food.id] = true;
+  }
+
+  Object.assign(state.favorites, snapshot.favorites || {});
+  Object.assign(state.hiddenIds, snapshot.hiddenIds || {});
+
+  const customs = Array.isArray(snapshot.customFoods)
+    ? snapshot.customFoods
+    : loadedFoods.filter((f) => !["cloud", "seed", "legacy"].includes(f.source));
+
+  mergeCustomFoods(state.customFoods, customs);
+  mergeDays(state.days, snapshot.days);
+  mergeGroups(state.groups, snapshot.groups);
+
+  if (snapshot.goals) state.goals = normalizeGoals({ ...state.goals, ...snapshot.goals });
+}
+
+function loadState() {
+  state.customFoods = [];
+  state.favorites = {};
+  state.hiddenIds = {};
+  state.days = {};
+  state.groups = [];
+
+  // Une versões antigas e a atual: nada é descartado
+  for (const key of LEGACY_KEYS) applySnapshot(readStore(key));
+  applySnapshot(readStore(STORAGE_KEY));
+}
+
+/** Remove apenas cópias idênticas ao catálogo da nuvem, liberando espaço sem perder edições. */
+function pruneRedundantCustoms() {
+  if (!state.cloudReady || !state.cloudFoods.length) return 0;
+  const cloudByName = new Map(state.cloudFoods.map((f) => [f.name.toLowerCase(), f]));
+  const numericKeys = ["portion", "carbs", "protein", "fat", "satFat", "fiber", "sodium", "addedSugar"];
+
+  const before = state.customFoods.length;
+  state.customFoods = state.customFoods.filter((food) => {
+    if (food.source === "manual") return true;
+    const cloud = cloudByName.get(food.name.toLowerCase());
+    if (!cloud) return true;
+    const sameNumbers = numericKeys.every((k) => round(num(food[k]), 3) === round(num(cloud[k]), 3));
+    const sameCategory = !food.category || food.category === cloud.category;
+    return !(sameNumbers && sameCategory);
+  });
+  return before - state.customFoods.length;
 }
 
 function saveState() {
@@ -314,15 +397,31 @@ function saveState() {
         goals: state.goals,
       }),
     );
-    // limpa chave antiga grande, se existir
-    localStorage.removeItem("dieta-tracker-v1");
     return true;
   } catch (err) {
     console.error(err);
     const quota = err && (err.name === "QuotaExceededError" || err.code === 22);
+    if (quota && pruneRedundantCustoms() > 0) {
+      try {
+        localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({
+            customFoods: state.customFoods,
+            favorites: state.favorites,
+            hiddenIds: state.hiddenIds,
+            days: state.days,
+            groups: state.groups,
+            goals: state.goals,
+          }),
+        );
+        return true;
+      } catch {
+        /* segue para o aviso */
+      }
+    }
     alert(
       quota
-        ? "Espaço do navegador insuficiente para salvar. O banco grande fica na nuvem; salve só favoritos/itens próprios."
+        ? "Espaço do navegador insuficiente para salvar. Exporte um backup (aba Metas) antes de continuar."
         : "Não foi possível salvar os dados neste navegador.",
     );
     return false;
@@ -1598,22 +1697,21 @@ function bindEvents() {
     if (!file) return;
     try {
       const data = JSON.parse(await file.text());
-      if (Array.isArray(data.customFoods)) state.customFoods = data.customFoods.map(normalizeFood);
-      else if (Array.isArray(data.foods)) {
-        state.customFoods = data.foods
-          .map(normalizeFood)
-          .filter((f) => !["cloud", "seed", "legacy"].includes(f.source));
-      }
-      if (data.favorites && typeof data.favorites === "object") state.favorites = data.favorites;
-      if (data.hiddenIds && typeof data.hiddenIds === "object") state.hiddenIds = data.hiddenIds;
-      if (data.days && typeof data.days === "object") state.days = data.days;
-      if (Array.isArray(data.groups)) state.groups = data.groups;
-      if (data.goals) state.goals = normalizeGoals(data.goals);
+      const foodsBefore = state.customFoods.length;
+      const daysBefore = Object.keys(state.days).length;
+
+      // União: o backup complementa o que já existe, sem apagar nada
+      applySnapshot(data);
+
       rebuildFoods();
       saveState();
       fillGoalsForm();
       renderAll();
-      alert("Backup restaurado.");
+      alert(
+        `Backup unido aos dados atuais.\n` +
+          `Alimentos próprios: ${foodsBefore} → ${state.customFoods.length}\n` +
+          `Dias com registro: ${daysBefore} → ${Object.keys(state.days).length}`,
+      );
     } catch {
       alert("Arquivo de backup inválido.");
     }
