@@ -101,10 +101,48 @@ function searchKey(value) {
     .replace(/\s+/g, " ");
 }
 
-function matchesSearch(value, query) {
-  const searchable = searchKey(value);
-  const terms = searchKey(query).split(" ").filter(Boolean);
+function searchTerms(query) {
+  return searchKey(query).split(" ").filter(Boolean);
+}
+
+function foodSearchText(food) {
+  return searchKey([food.name, food.category, food.fonte, food.tags].filter(Boolean).join(" "));
+}
+
+function matchesSearch(foodOrName, query) {
+  const terms = searchTerms(query);
+  if (!terms.length) return true;
+  const searchable =
+    typeof foodOrName === "string" ? searchKey(foodOrName) : foodSearchText(foodOrName);
   return terms.every((term) => searchable.includes(term));
+}
+
+/** Menor = melhor. Favorece frase exata, início do nome e termos próximos. */
+function searchRank(food, query) {
+  const terms = searchTerms(query);
+  const name = searchKey(food.name);
+  const hay = foodSearchText(food);
+  const phrase = terms.join(" ");
+  let score = 1000;
+
+  if (name === phrase) score -= 500;
+  if (name.startsWith(phrase)) score -= 300;
+  if (name.includes(phrase)) score -= 200;
+
+  const positions = terms.map((t) => name.indexOf(t)).filter((i) => i >= 0);
+  if (positions.length === terms.length && terms.length > 1) {
+    const span = Math.max(...positions) - Math.min(...positions);
+    score -= Math.max(0, 120 - span); // termos mais juntos no nome
+  }
+
+  if (terms[0] && name.startsWith(terms[0])) score -= 80;
+  if (terms.every((t) => name.includes(t))) score -= 60;
+  if (food.favorite) score -= 40;
+  if (food.fonte && terms.some((t) => searchKey(food.fonte).includes(t))) score -= 25;
+
+  score += Math.min(name.length, 80); // nomes mais curtos um pouco à frente
+  if (!hay) score += 50;
+  return score;
 }
 
 function kcalOf({ carbs, protein, fat }) {
@@ -136,6 +174,7 @@ function normalizeFood(raw) {
     addedSugar: num(raw.addedSugar ?? raw.added_sugar ?? raw.sugar),
     netCarbs: num(raw.netCarbs ?? raw.net_carbs, Math.max(carbs - fiber, 0)),
     category,
+    fonte: String(raw.fonte || raw.sourceLabel || raw.tags || "").trim(),
     favorite: Boolean(raw.favorite),
     source: raw.source || "custom",
   };
@@ -463,7 +502,7 @@ function renderCategoryChips() {
 function filteredFoods(text = "") {
   const q = searchKey(text);
   return state.foods.filter((food) => {
-    if (q && !matchesSearch(food.name, q)) return false;
+    if (q && !matchesSearch(food, q)) return false;
     if (state.activeCategory === "★") return food.favorite;
     if (state.activeCategory !== "Todas" && food.category !== state.activeCategory) return false;
     return true;
@@ -582,8 +621,8 @@ function renderSuggestions(query, boxId, onPickAttr) {
     return;
   }
   const hits = state.foods
-    .filter((f) => matchesSearch(f.name, q))
-    .sort((a, b) => Number(b.favorite) - Number(a.favorite) || a.name.length - b.name.length)
+    .filter((f) => matchesSearch(f, q))
+    .sort((a, b) => searchRank(a, q) - searchRank(b, q) || a.name.localeCompare(b.name, "pt"))
     .slice(0, 200);
   if (!hits.length) {
     closeSuggestions(box);
@@ -595,9 +634,9 @@ function renderSuggestions(query, boxId, onPickAttr) {
       (f) => `
       <button type="button" ${onPickAttr}="${f.id}">
         ${f.favorite ? "★ " : ""}${escapeHtml(f.name)}
-        <span class="meta">${f.category} · base ${f.portion} · C${round(f.carbs)} P${round(f.protein)} G${round(
-          f.fat,
-        )} · ${round(kcalOf(f), 0)} kcal</span>
+        <span class="meta">${f.category}${f.fonte ? ` · ${escapeHtml(f.fonte)}` : ""} · base ${f.portion} · C${round(
+          f.carbs,
+        )} P${round(f.protein)} G${round(f.fat)} · ${round(kcalOf(f), 0)} kcal</span>
       </button>`,
     )
     .join("");
@@ -730,6 +769,7 @@ const HEADER_ALIASES = {
   addedSugar: ["addedsugar", "acucares", "açucares", "açúcares", "acucar", "açúcar"],
   netCarbs: ["netcarbs", "carboidratos liquidos", "carboidratos líquidos", "net carbs"],
   category: ["category", "categoria", "grupo"],
+  fonte: ["fonte", "source", "origem", "tags", "banco"],
 };
 
 function normalizeHeader(h) {
@@ -779,7 +819,7 @@ function parseDelimited(text) {
       sodium: 7,
       addedSugar: 8,
       netCarbs: 9,
-      category: 10,
+      fonte: 10,
     };
     start = 0;
   }
@@ -792,6 +832,11 @@ function parseDelimited(text) {
     const val = (key) => (cols[key] != null ? row[cols[key]] : undefined);
     const carbs = num(val("carbs"));
     const fiber = num(val("fiber"));
+    const fonteRaw = val("fonte");
+    const categoryRaw = val("category");
+    // CSV do Excel: última coluna costuma ser Fonte (TACO), não categoria
+    const looksLikeFonte =
+      fonteRaw && /^(taco|tbca|usda|marca|gpt|off|manual)/i.test(String(fonteRaw).trim());
     foods.push(
       normalizeFood({
         name,
@@ -804,7 +849,8 @@ function parseDelimited(text) {
         sodium: num(val("sodium")),
         addedSugar: num(val("addedSugar")),
         netCarbs: num(val("netCarbs"), Math.max(carbs - fiber, 0)),
-        category: val("category"),
+        category: looksLikeFonte ? "Outros" : categoryRaw,
+        fonte: looksLikeFonte ? fonteRaw : fonteRaw || "",
         source: "import",
       }),
     );
