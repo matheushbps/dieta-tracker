@@ -302,6 +302,22 @@ textarea {
   gap: 10px;
 }
 
+.weekday-goals {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(6, 13, 30, 0.35);
+}
+
+.weekday-grid label.weekday-active {
+  color: var(--accent-soft);
+}
+
+.weekday-grid label.weekday-active input {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
 label {
   display: grid;
   gap: 6px;

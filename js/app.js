@@ -1,8 +1,25 @@
 const STORAGE_KEY = "dieta-tracker-v2";
 
+const DEFAULT_KCAL = 2200;
+
+const WEEKDAYS = [
+  { key: "sun", label: "Domingo", short: "Dom" },
+  { key: "mon", label: "Segunda", short: "Seg" },
+  { key: "tue", label: "Terça", short: "Ter" },
+  { key: "wed", label: "Quarta", short: "Qua" },
+  { key: "thu", label: "Quinta", short: "Qui" },
+  { key: "fri", label: "Sexta", short: "Sex" },
+  { key: "sat", label: "Sábado", short: "Sáb" },
+];
+
+function defaultKcalByWeekday(value = DEFAULT_KCAL) {
+  return Object.fromEntries(WEEKDAYS.map((d) => [d.key, value]));
+}
+
 const DEFAULT_GOALS = {
   weight: 84,
-  kcal: 2200,
+  kcal: DEFAULT_KCAL,
+  kcalByWeekday: defaultKcalByWeekday(DEFAULT_KCAL),
   carbPerKg: 3.1,
   proteinPerKg: 2.2,
   fatPerKg: 0.85,
@@ -44,7 +61,7 @@ const state = {
   hiddenIds: {},
   days: {},
   groups: [],
-  goals: { ...DEFAULT_GOALS },
+  goals: normalizeGoals({ ...DEFAULT_GOALS }),
   selectedDate: todayISO(),
   selectedFood: null,
   groupSelectedFood: null,
@@ -61,6 +78,31 @@ const state = {
 function todayISO(date = new Date()) {
   const off = date.getTimezoneOffset();
   return new Date(date.getTime() - off * 60000).toISOString().slice(0, 10);
+}
+
+function weekdayInfo(isoDate = state.selectedDate) {
+  const d = new Date(`${isoDate}T12:00:00`);
+  return WEEKDAYS[d.getDay()] || WEEKDAYS[0];
+}
+
+function normalizeGoals(raw = {}) {
+  const base = { ...DEFAULT_GOALS, ...raw };
+  const fallback = num(base.kcal, DEFAULT_KCAL);
+  const incoming = raw.kcalByWeekday && typeof raw.kcalByWeekday === "object" ? raw.kcalByWeekday : {};
+  base.kcalByWeekday = defaultKcalByWeekday(fallback);
+  for (const day of WEEKDAYS) {
+    base.kcalByWeekday[day.key] = num(incoming[day.key], fallback);
+  }
+  base.kcal = num(base.kcalByWeekday[weekdayInfo(todayISO()).key], fallback);
+  return base;
+}
+
+function kcalGoalForDate(isoDate = state.selectedDate) {
+  const day = weekdayInfo(isoDate);
+  const by = state.goals.kcalByWeekday || {};
+  const specific = num(by[day.key], NaN);
+  if (Number.isFinite(specific) && specific >= 0) return specific;
+  return num(state.goals.kcal, DEFAULT_KCAL);
 }
 
 function uid(prefix = "id") {
@@ -241,7 +283,7 @@ function loadState() {
 
     state.days = data.days && typeof data.days === "object" ? data.days : {};
     state.groups = Array.isArray(data.groups) ? data.groups : [];
-    state.goals = { ...DEFAULT_GOALS, ...(data.goals || {}) };
+    state.goals = normalizeGoals(data.goals || {});
   } catch {
     /* storage corrompido: começa limpo */
   }
@@ -393,13 +435,15 @@ function renderStats() {
   const g = state.goals;
   const weight = g.weight || 1;
   const fTarget = fiberTarget(t.kcal);
+  const day = weekdayInfo();
+  const kcalGoal = kcalGoalForDate();
 
   document.getElementById("statsEnergia").innerHTML = statCard({
-    label: "Calorias",
+    label: `Calorias · ${day.label}`,
     value: `${round(t.kcal, 0)}`,
-    sub: `meta ${g.kcal} kcal · restam ${round(Math.max(g.kcal - t.kcal, 0), 0)}`,
-    cls: statusClass(t.kcal, g.kcal, "max"),
-    pct: g.kcal ? (t.kcal / g.kcal) * 100 : 0,
+    sub: `meta ${kcalGoal} kcal · restam ${round(Math.max(kcalGoal - t.kcal, 0), 0)}`,
+    cls: statusClass(t.kcal, kcalGoal, "max"),
+    pct: kcalGoal ? (t.kcal / kcalGoal) * 100 : 0,
     hero: true,
   });
 
@@ -489,6 +533,10 @@ function renderStats() {
   ].join("");
 
   document.getElementById("weightPill").textContent = `Peso: ${g.weight} kg`;
+  const weekdayPill = document.getElementById("weekdayPill");
+  if (weekdayPill) {
+    weekdayPill.textContent = `${day.label} · meta ${kcalGoal} kcal`;
+  }
 
   const satPill = document.getElementById("satPill");
   const satOk = t.satFat <= g.satFatLimit;
@@ -1119,7 +1167,7 @@ function renderCharts() {
         {
           label: "Meta",
           type: "line",
-          data: dates.map(() => state.goals.kcal),
+          data: dates.map((d) => kcalGoalForDate(d)),
           borderColor: "#f2c161",
           pointRadius: 0,
         },
@@ -1180,8 +1228,18 @@ function switchTab(name) {
 
 function fillGoalsForm() {
   const form = document.getElementById("goalsForm");
-  for (const [k, v] of Object.entries(state.goals)) {
+  const goals = normalizeGoals(state.goals);
+  state.goals = goals;
+  for (const [k, v] of Object.entries(goals)) {
+    if (k === "kcalByWeekday") continue;
     if (form.elements[k]) form.elements[k].value = v;
+  }
+  const active = weekdayInfo(state.selectedDate).key;
+  for (const day of WEEKDAYS) {
+    const input = form.elements[`kcal_${day.key}`];
+    if (!input) continue;
+    input.value = goals.kcalByWeekday[day.key];
+    input.closest("label")?.classList.toggle("weekday-active", day.key === active);
   }
 }
 
@@ -1205,6 +1263,7 @@ function bindEvents() {
   dateInput.value = state.selectedDate;
   dateInput.addEventListener("change", () => {
     state.selectedDate = dateInput.value || todayISO();
+    fillGoalsForm();
     renderAll();
   });
 
@@ -1460,12 +1519,31 @@ function bindEvents() {
   document.getElementById("goalsForm").addEventListener("submit", (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
+    const next = { ...state.goals };
     for (const key of Object.keys(DEFAULT_GOALS)) {
-      state.goals[key] = num(fd.get(key), DEFAULT_GOALS[key]);
+      if (key === "kcalByWeekday") continue;
+      next[key] = num(fd.get(key), DEFAULT_GOALS[key]);
     }
+    next.kcalByWeekday = defaultKcalByWeekday(next.kcal);
+    for (const day of WEEKDAYS) {
+      next.kcalByWeekday[day.key] = num(fd.get(`kcal_${day.key}`), next.kcal);
+    }
+    next.kcal = kcalGoalForDate(todayISO());
+    // keep kcal synced to "today" for backups/compat, but use weekday map as source of truth
+    next.kcal = next.kcalByWeekday[weekdayInfo(todayISO()).key];
+    state.goals = normalizeGoals(next);
     saveState();
     renderAll();
     alert("Metas salvas.");
+  });
+
+  document.getElementById("applyKcalAllBtn")?.addEventListener("click", () => {
+    const form = document.getElementById("goalsForm");
+    const value = num(form.elements.kcal?.value, DEFAULT_KCAL);
+    for (const day of WEEKDAYS) {
+      const input = form.elements[`kcal_${day.key}`];
+      if (input) input.value = value;
+    }
   });
 
   document.getElementById("exportAllBtn").addEventListener("click", () => {
@@ -1494,7 +1572,7 @@ function bindEvents() {
       if (data.hiddenIds && typeof data.hiddenIds === "object") state.hiddenIds = data.hiddenIds;
       if (data.days && typeof data.days === "object") state.days = data.days;
       if (Array.isArray(data.groups)) state.groups = data.groups;
-      if (data.goals) state.goals = { ...DEFAULT_GOALS, ...data.goals };
+      if (data.goals) state.goals = normalizeGoals(data.goals);
       rebuildFoods();
       saveState();
       fillGoalsForm();
