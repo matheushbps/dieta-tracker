@@ -537,24 +537,35 @@ function renderQuickChips() {
     parts.join("") || `<span class="muted">Marque favoritos na aba Banco para acesso rápido.</span>`;
 }
 
+function closeSuggestions(box) {
+  const el = typeof box === "string" ? document.getElementById(box) : box;
+  if (!el) return;
+  el.classList.add("hidden");
+  el.innerHTML = "";
+  el.closest(".panel")?.classList.remove("raised");
+}
+
+function openSuggestions(box) {
+  box.classList.remove("hidden");
+  box.closest(".panel")?.classList.add("raised");
+}
+
 function renderSuggestions(query, boxId, onPickAttr) {
   const box = document.getElementById(boxId);
   const q = searchKey(query);
   if (!q) {
-    box.classList.add("hidden");
-    box.innerHTML = "";
+    closeSuggestions(box);
     return;
   }
   const hits = state.foods
     .filter((f) => matchesSearch(f.name, q))
     .sort((a, b) => Number(b.favorite) - Number(a.favorite) || a.name.length - b.name.length)
-    .slice(0, 14);
+    .slice(0, 40);
   if (!hits.length) {
-    box.classList.add("hidden");
-    box.innerHTML = "";
+    closeSuggestions(box);
     return;
   }
-  box.classList.remove("hidden");
+  openSuggestions(box);
   box.innerHTML = hits
     .map(
       (f) => `
@@ -574,7 +585,7 @@ function selectFood(food) {
   document.getElementById("portionHint").value = `${food.portion}`;
   document.getElementById("qtyInput").value = String(food.portion);
   document.getElementById("foodSearch").value = food.name;
-  document.getElementById("suggestions").classList.add("hidden");
+  closeSuggestions("suggestions");
 }
 
 function clearFoodSelection() {
@@ -583,8 +594,7 @@ function clearFoodSelection() {
   document.getElementById("qtyInput").value = "";
   document.getElementById("portionHint").value = "";
   document.getElementById("selectedFoodLabel").textContent = "Nenhum alimento selecionado.";
-  document.getElementById("suggestions").classList.add("hidden");
-  document.getElementById("suggestions").innerHTML = "";
+  closeSuggestions("suggestions");
 }
 
 /* ---------- grupos ---------- */
@@ -1163,7 +1173,7 @@ function bindEvents() {
     document.getElementById("groupSelectedLabel").textContent = `Selecionado: ${food.name}`;
     document.getElementById("groupFoodSearch").value = food.name;
     document.getElementById("groupQty").value = String(food.portion);
-    document.getElementById("groupSuggestions").classList.add("hidden");
+    closeSuggestions("groupSuggestions");
   });
 
   document.getElementById("addToGroupBtn").addEventListener("click", () => {
@@ -1272,9 +1282,15 @@ function bindEvents() {
 
   document.addEventListener("click", (e) => {
     if (!e.target.closest(".search-wrap")) {
-      document.getElementById("suggestions").classList.add("hidden");
-      document.getElementById("groupSuggestions").classList.add("hidden");
+      closeSuggestions("suggestions");
+      closeSuggestions("groupSuggestions");
     }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    closeSuggestions("suggestions");
+    closeSuggestions("groupSuggestions");
   });
 }
 

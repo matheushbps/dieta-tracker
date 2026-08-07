@@ -158,12 +158,20 @@ textarea {
 }
 
 .panel {
+  position: relative;
   border: 1px solid var(--line);
   background: linear-gradient(180deg, rgba(148, 180, 255, 0.07), rgba(148, 180, 255, 0.03));
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: 16px;
   backdrop-filter: blur(6px);
+}
+
+/* backdrop-filter cria contexto de empilhamento: sem isto os painéis
+   seguintes cobrem a lista de sugestões */
+.panel.raised {
+  z-index: 80;
+  backdrop-filter: none;
 }
 
 .panel h2,
@@ -348,13 +356,15 @@ textarea {
 
 .suggestions {
   position: absolute;
-  z-index: 30;
+  z-index: 90;
   top: calc(100% + 4px);
   left: 0;
   right: 0;
-  max-height: 280px;
+  max-height: min(60vh, 420px);
   overflow: auto;
-  border: 1px solid var(--line);
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
   border-radius: 12px;
   background: #0b1428;
   box-shadow: var(--shadow);
