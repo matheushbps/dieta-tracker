@@ -1,9 +1,9 @@
-const CACHE = "dieta-tracker-v14";
+const CACHE = "dieta-tracker-v15";
 const ASSETS = [
   "./",
   "./index.html",
-  "./css/app.css?v=14",
-  "./js/app.js?v=14",
+  "./css/app.css?v=15",
+  "./js/app.js?v=15",
   "./data/foods.cloud.json",
   "./manifest.webmanifest",
   "./icons/icon.svg",

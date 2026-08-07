@@ -87,22 +87,34 @@ function weekdayInfo(isoDate = state.selectedDate) {
 
 function normalizeGoals(raw = {}) {
   const base = { ...DEFAULT_GOALS, ...raw };
-  const fallback = num(base.kcal, DEFAULT_KCAL);
-  const incoming = raw.kcalByWeekday && typeof raw.kcalByWeekday === "object" ? raw.kcalByWeekday : {};
-  base.kcalByWeekday = defaultKcalByWeekday(fallback);
-  for (const day of WEEKDAYS) {
-    base.kcalByWeekday[day.key] = num(incoming[day.key], fallback);
-  }
-  base.kcal = num(base.kcalByWeekday[weekdayInfo(todayISO()).key], fallback);
+  base.weight = num(base.weight, DEFAULT_GOALS.weight);
+  base.carbPerKg = num(base.carbPerKg, DEFAULT_GOALS.carbPerKg);
+  base.proteinPerKg = num(base.proteinPerKg, DEFAULT_GOALS.proteinPerKg);
+  base.fatPerKg = num(base.fatPerKg, DEFAULT_GOALS.fatPerKg);
+  const computed = kcalFromMacros(base);
+  base.kcal = computed;
+  // Mantém mapa por dia alinhado à fórmula (mesma meta todos os dias, a partir dos macros)
+  base.kcalByWeekday = defaultKcalByWeekday(computed);
   return base;
 }
 
-function kcalGoalForDate(isoDate = state.selectedDate) {
-  const day = weekdayInfo(isoDate);
-  const by = state.goals.kcalByWeekday || {};
-  const specific = num(by[day.key], NaN);
-  if (Number.isFinite(specific) && specific >= 0) return specific;
-  return num(state.goals.kcal, DEFAULT_KCAL);
+/** Meta calórica = carb/kg×4×peso + prot/kg×4×peso + gord/kg×9×peso */
+function kcalFromMacros(goals = state.goals) {
+  const weight = num(goals.weight, 0);
+  const carb = num(goals.carbPerKg, 0);
+  const prot = num(goals.proteinPerKg, 0);
+  const fat = num(goals.fatPerKg, 0);
+  return round(weight * (carb * 4 + prot * 4 + fat * 9), 0);
+}
+
+function kcalGoalForDate(_isoDate = state.selectedDate) {
+  return kcalFromMacros(state.goals);
+}
+
+/** Limite de GS (g) = 10% das calorias ÷ 9 kcal/g */
+function satFatLimitFromKcal(kcal) {
+  const energy = Math.max(num(kcal), 0);
+  return round((energy * 0.1) / 9, 1);
 }
 
 function uid(prefix = "id") {
@@ -437,11 +449,14 @@ function renderStats() {
   const fTarget = fiberTarget(t.kcal);
   const day = weekdayInfo();
   const kcalGoal = kcalGoalForDate();
+  const energyForSat = t.kcal > 0 ? t.kcal : kcalGoal;
+  const satLimit = satFatLimitFromKcal(energyForSat);
+  const satLimitNote = t.kcal > 0 ? "10% das kcal ingeridas ÷ 9" : "provisório: 10% da meta ÷ 9";
 
   document.getElementById("statsEnergia").innerHTML = statCard({
     label: `Calorias · ${day.label}`,
     value: `${round(t.kcal, 0)}`,
-    sub: `meta ${kcalGoal} kcal · restam ${round(Math.max(kcalGoal - t.kcal, 0), 0)}`,
+    sub: `meta ${kcalGoal} kcal (macros×peso) · restam ${round(Math.max(kcalGoal - t.kcal, 0), 0)}`,
     cls: statusClass(t.kcal, kcalGoal, "max"),
     pct: kcalGoal ? (t.kcal / kcalGoal) * 100 : 0,
     hero: true,
@@ -478,9 +493,9 @@ function renderStats() {
     statCard({
       label: "Gord. saturada (g)",
       value: round(t.satFat),
-      sub: `limite ${g.satFatLimit} g`,
-      cls: statusClass(t.satFat, g.satFatLimit, "max"),
-      pct: g.satFatLimit ? (t.satFat / g.satFatLimit) * 100 : 0,
+      sub: `limite ${satLimit} g · ${satLimitNote}`,
+      cls: statusClass(t.satFat, satLimit || 0.1, "max"),
+      pct: satLimit ? (t.satFat / satLimit) * 100 : 0,
     }),
     statCard({
       label: "Fibras (g)",
@@ -539,11 +554,11 @@ function renderStats() {
   }
 
   const satPill = document.getElementById("satPill");
-  const satOk = t.satFat <= g.satFatLimit;
+  const satOk = t.satFat <= satLimit;
   satPill.className = `pill ${satOk ? "ok" : "bad"}`;
   satPill.textContent = satOk
-    ? `GS dentro do limite (${round(t.satFat)}/${g.satFatLimit} g)`
-    : `GS acima do limite (${round(t.satFat)}/${g.satFatLimit} g)`;
+    ? `GS dentro do limite (${round(t.satFat)}/${satLimit} g)`
+    : `GS acima do limite (${round(t.satFat)}/${satLimit} g)`;
 
   const fiberPill = document.getElementById("fiberPill");
   const fiberOk = t.fiber >= fTarget;
@@ -1230,16 +1245,49 @@ function fillGoalsForm() {
   const form = document.getElementById("goalsForm");
   const goals = normalizeGoals(state.goals);
   state.goals = goals;
-  for (const [k, v] of Object.entries(goals)) {
-    if (k === "kcalByWeekday") continue;
-    if (form.elements[k]) form.elements[k].value = v;
+  for (const key of ["weight", "carbPerKg", "proteinPerKg", "fatPerKg", "fiberGoal", "fiberPer1000", "sodiumLimit", "addedSugarLimit"]) {
+    if (form.elements[key]) form.elements[key].value = goals[key];
   }
+  const computed = kcalFromMacros(goals);
   const active = weekdayInfo(state.selectedDate).key;
   for (const day of WEEKDAYS) {
     const input = form.elements[`kcal_${day.key}`];
     if (!input) continue;
-    input.value = goals.kcalByWeekday[day.key];
+    input.value = computed;
     input.closest("label")?.classList.toggle("weekday-active", day.key === active);
+  }
+  const kcalPill = document.getElementById("kcalFormulaPill");
+  if (kcalPill) {
+    kcalPill.textContent = `Meta: ${computed} kcal = ${goals.weight}×(${goals.carbPerKg}×4 + ${goals.proteinPerKg}×4 + ${goals.fatPerKg}×9)`;
+  }
+  const satPill = document.getElementById("satFormulaPill");
+  if (satPill) {
+    const preview = satFatLimitFromKcal(computed);
+    satPill.textContent = `Limite GS ≈ ${preview} g na meta (10% das kcal ÷ 9); no dia usa as kcal ingeridas`;
+  }
+}
+
+function previewGoalsFromForm() {
+  const form = document.getElementById("goalsForm");
+  if (!form) return;
+  const draft = {
+    weight: num(form.elements.weight?.value, state.goals.weight),
+    carbPerKg: num(form.elements.carbPerKg?.value, state.goals.carbPerKg),
+    proteinPerKg: num(form.elements.proteinPerKg?.value, state.goals.proteinPerKg),
+    fatPerKg: num(form.elements.fatPerKg?.value, state.goals.fatPerKg),
+  };
+  const computed = kcalFromMacros(draft);
+  for (const day of WEEKDAYS) {
+    const input = form.elements[`kcal_${day.key}`];
+    if (input) input.value = computed;
+  }
+  const kcalPill = document.getElementById("kcalFormulaPill");
+  if (kcalPill) {
+    kcalPill.textContent = `Meta: ${computed} kcal = ${draft.weight}×(${draft.carbPerKg}×4 + ${draft.proteinPerKg}×4 + ${draft.fatPerKg}×9)`;
+  }
+  const satPill = document.getElementById("satFormulaPill");
+  if (satPill) {
+    satPill.textContent = `Limite GS ≈ ${satFatLimitFromKcal(computed)} g na meta (10% das kcal ÷ 9); no dia usa as kcal ingeridas`;
   }
 }
 
@@ -1520,30 +1568,18 @@ function bindEvents() {
     e.preventDefault();
     const fd = new FormData(e.target);
     const next = { ...state.goals };
-    for (const key of Object.keys(DEFAULT_GOALS)) {
-      if (key === "kcalByWeekday") continue;
+    for (const key of ["weight", "carbPerKg", "proteinPerKg", "fatPerKg", "fiberGoal", "fiberPer1000", "sodiumLimit", "addedSugarLimit"]) {
       next[key] = num(fd.get(key), DEFAULT_GOALS[key]);
     }
-    next.kcalByWeekday = defaultKcalByWeekday(next.kcal);
-    for (const day of WEEKDAYS) {
-      next.kcalByWeekday[day.key] = num(fd.get(`kcal_${day.key}`), next.kcal);
-    }
-    next.kcal = kcalGoalForDate(todayISO());
-    // keep kcal synced to "today" for backups/compat, but use weekday map as source of truth
-    next.kcal = next.kcalByWeekday[weekdayInfo(todayISO()).key];
     state.goals = normalizeGoals(next);
     saveState();
+    fillGoalsForm();
     renderAll();
     alert("Metas salvas.");
   });
 
-  document.getElementById("applyKcalAllBtn")?.addEventListener("click", () => {
-    const form = document.getElementById("goalsForm");
-    const value = num(form.elements.kcal?.value, DEFAULT_KCAL);
-    for (const day of WEEKDAYS) {
-      const input = form.elements[`kcal_${day.key}`];
-      if (input) input.value = value;
-    }
+  ["weight", "carbPerKg", "proteinPerKg", "fatPerKg"].forEach((name) => {
+    document.getElementById("goalsForm").elements[name]?.addEventListener("input", previewGoalsFromForm);
   });
 
   document.getElementById("exportAllBtn").addEventListener("click", () => {
