@@ -1,3 +1,13 @@
+import {
+  configureSync,
+  initAuth,
+  isConfigured,
+  schedulePush,
+  signInWithEmail,
+  signOut,
+  isApplyingRemote,
+} from "./sync.js?v=17";
+
 const STORAGE_KEY = "dieta-tracker-v2";
 
 const DEFAULT_KCAL = 2200;
@@ -397,6 +407,7 @@ function saveState() {
         goals: state.goals,
       }),
     );
+    if (!isApplyingRemote()) schedulePush();
     return true;
   } catch (err) {
     console.error(err);
@@ -414,6 +425,7 @@ function saveState() {
             goals: state.goals,
           }),
         );
+        if (!isApplyingRemote()) schedulePush();
         return true;
       } catch {
         /* segue para o aviso */
@@ -426,6 +438,122 @@ function saveState() {
     );
     return false;
   }
+}
+
+function getSyncPayload() {
+  return {
+    customFoods: state.customFoods,
+    favorites: state.favorites,
+    hiddenIds: state.hiddenIds,
+    days: state.days,
+    groups: state.groups,
+    goals: state.goals,
+  };
+}
+
+function applyRemoteSnapshot(data, { replace = false } = {}) {
+  if (replace) {
+    state.customFoods = Array.isArray(data.customFoods)
+      ? data.customFoods.map(normalizeFood)
+      : Array.isArray(data.foods)
+        ? data.foods.map(normalizeFood).filter((f) => !["cloud", "seed", "legacy"].includes(f.source))
+        : [];
+    state.favorites = data.favorites && typeof data.favorites === "object" ? { ...data.favorites } : {};
+    state.hiddenIds = data.hiddenIds && typeof data.hiddenIds === "object" ? { ...data.hiddenIds } : {};
+    state.days = data.days && typeof data.days === "object" ? JSON.parse(JSON.stringify(data.days)) : {};
+    state.groups = Array.isArray(data.groups) ? JSON.parse(JSON.stringify(data.groups)) : [];
+    state.goals = normalizeGoals(data.goals || state.goals);
+  } else {
+    // União na migração inicial: nuvem + dados locais deste aparelho
+    applySnapshot(data);
+  }
+  rebuildFoods();
+  saveStateLocalOnly();
+}
+
+function saveStateLocalOnly() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(getSyncPayload()));
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+function setSyncStatusUI(status, detail = "") {
+  const el = document.getElementById("syncStatus");
+  if (!el) return;
+  const labels = {
+    salvo: "Salvo",
+    sincronizando: "Sincronizando",
+    offline: "Offline",
+    erro: "Erro",
+  };
+  el.dataset.status = status;
+  el.textContent = detail ? `${labels[status] || status}: ${detail}` : labels[status] || status;
+  el.title = detail || labels[status] || status;
+}
+
+function setAppUnlocked(unlocked, session) {
+  const gate = document.getElementById("authGate");
+  const root = document.getElementById("appRoot");
+  const signOutBtn = document.getElementById("signOutBtn");
+  if (root) root.classList.toggle("locked", !unlocked);
+  if (gate) gate.classList.toggle("hidden", unlocked);
+  if (signOutBtn) {
+    signOutBtn.hidden = !session;
+    signOutBtn.textContent = session?.user?.email ? `Sair (${session.user.email})` : "Sair";
+  }
+}
+
+function bindAuthUI() {
+  const form = document.getElementById("authForm");
+  const msg = document.getElementById("authMessage");
+  const intro = document.getElementById("authIntro");
+  const cfgForm = document.getElementById("configForm");
+
+  import("./config.js?v=17").then(({ getSupabaseUrl, getSupabaseAnonKey, saveSupabaseConfig, isSupabaseConfigured }) => {
+    const urlInput = document.getElementById("cfgUrl");
+    const anonInput = document.getElementById("cfgAnon");
+    if (urlInput) urlInput.value = getSupabaseUrl();
+    if (anonInput) anonInput.value = getSupabaseAnonKey();
+
+    if (!isSupabaseConfigured()) {
+      if (intro) {
+        intro.textContent =
+          "Configure o Supabase abaixo e depois entre com seu e-mail para sincronizar PC e celular.";
+      }
+      form?.querySelector("button")?.setAttribute("disabled", "true");
+    } else {
+      form?.querySelector("button")?.removeAttribute("disabled");
+    }
+
+    cfgForm?.addEventListener("submit", (e) => {
+      e.preventDefault();
+      saveSupabaseConfig(urlInput?.value, anonInput?.value);
+      msg.textContent = "Configuração salva. Recarregando…";
+      setTimeout(() => window.location.reload(), 400);
+    });
+  });
+
+  form?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const email = document.getElementById("authEmail")?.value;
+    if (!email) return;
+    msg.textContent = "Enviando link…";
+    try {
+      await signInWithEmail(email);
+      msg.textContent = "Link enviado. Abra o e-mail neste aparelho (PC ou celular) para entrar.";
+    } catch (err) {
+      console.error(err);
+      msg.textContent = err.message || "Não foi possível enviar o link.";
+    }
+  });
+
+  document.getElementById("signOutBtn")?.addEventListener("click", async () => {
+    if (!confirm("Sair da conta? Os dados locais permanecem neste aparelho.")) return;
+    await signOut();
+    setAppUnlocked(false, null);
+  });
 }
 
 async function loadCloudDatabase() {
@@ -1748,8 +1876,35 @@ async function init() {
   fillSelects();
   fillGoalsForm();
   bindEvents();
+  bindAuthUI();
   rebuildFoods();
   renderAll();
+
+  configureSync({
+    getPayload: getSyncPayload,
+    applyRemote: applyRemoteSnapshot,
+    onStatus: setSyncStatusUI,
+    onSession: (session) => {
+      setAppUnlocked(Boolean(session), session);
+      if (session) {
+        fillGoalsForm();
+        renderAll();
+      }
+    },
+    onAfterRemoteApply: () => {
+      fillGoalsForm();
+      renderAll();
+    },
+  });
+
+  if (isConfigured()) {
+    setSyncStatusUI("sincronizando", "Verificando sessão…");
+    await initAuth();
+  } else {
+    setAppUnlocked(false, null);
+    setSyncStatusUI("erro", "Configure js/config.js");
+  }
+
   await loadCloudDatabase();
   renderAll();
 

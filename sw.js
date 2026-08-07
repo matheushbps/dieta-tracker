@@ -1,9 +1,11 @@
-const CACHE = "dieta-tracker-v16";
+const CACHE = "dieta-tracker-v17";
 const ASSETS = [
   "./",
   "./index.html",
-  "./css/app.css?v=16",
-  "./js/app.js?v=16",
+  "./css/app.css?v=17",
+  "./js/app.js?v=17",
+  "./js/sync.js",
+  "./js/config.js",
   "./data/foods.cloud.json",
   "./manifest.webmanifest",
   "./icons/icon.svg",
@@ -32,11 +34,18 @@ self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
 
+  const url = new URL(request.url);
+  // Nunca cachear a API do Supabase
+  if (url.hostname.includes("supabase")) {
+    event.respondWith(fetch(request));
+    return;
+  }
+
   event.respondWith(
     fetch(request)
       .then((response) => {
         const copy = response.clone();
-        if (new URL(request.url).origin === self.location.origin) {
+        if (url.origin === self.location.origin) {
           caches.open(CACHE).then((cache) => cache.put(request, copy)).catch(() => {});
         }
         return response;

@@ -2,7 +2,39 @@
 
 Aplicativo web independente para controle nutricional diário: calorias, macros, fibras, gordura saturada, sódio, carboidratos líquidos e açúcares adicionados.
 
-Funciona em iOS, Windows e Mac pelo navegador, com tema azul escuro e suporte a instalação na tela de início (PWA + offline).
+Funciona em iOS, Windows e Mac pelo navegador, com tema azul escuro, PWA e **sincronização entre PC e celular** via Supabase (login por e-mail).
+
+## Sincronização (PC ↔ celular)
+
+Os registros do dia, metas, grupos, favoritos e alimentos próprios ficam na nuvem. Cada alteração é salva localmente e enviada ao Supabase; o outro aparelho recebe a versão atualizada.
+
+### 1. Criar o projeto Supabase (gratuito)
+
+1. Acesse [supabase.com](https://supabase.com) e crie um projeto.
+2. Abra **SQL Editor** → New query → cole o conteúdo de [`supabase/schema.sql`](supabase/schema.sql) → Run.
+3. Em **Authentication → URL Configuration**, adicione nas Redirect URLs:
+   - `https://matheushbps.github.io/dieta-tracker/`
+   - `http://localhost:5173/` (para testes locais)
+4. Em **Project Settings → API**, copie:
+   - **Project URL**
+   - **anon public** key
+5. Cole esses valores em [`js/config.js`](js/config.js):
+
+```js
+export const SUPABASE_URL = "https://xxxx.supabase.co";
+export const SUPABASE_ANON_KEY = "eyJhbGciOi...";
+```
+
+6. Faça commit e push para o GitHub Pages atualizar.
+
+### 2. Usar no dia a dia
+
+1. Abra o site no PC e no celular.
+2. Entre com o **mesmo e-mail** (recebe um link mágico, sem senha).
+3. Na primeira vez, o app une os dados locais com a nuvem e sobe o resultado.
+4. Depois disso, o que você editar em um aparelho aparece no outro (status: Salvo / Sincronizando / Offline).
+
+A chave `anon` pode ficar no frontend: o Row Level Security garante que cada usuário só lê/escreve a própria linha.
 
 ## Resumo do dia, separado em blocos
 
@@ -13,11 +45,7 @@ Funciona em iOS, Windows e Mac pelo navegador, com tema azul escuro e suporte a 
 
 ## Agrupamento de alimentos
 
-- **Categorias**: Proteínas, Carboidratos, Gorduras, Frutas, Vegetais, Laticínios, Bebidas, Doces, Suplementos, Preparos, Outros — com filtro por chips na aba **Banco**
-- **Favoritos**: marque com ★ e acesse pelos atalhos na aba **Hoje**
-- **Recentes**: últimos alimentos usados aparecem como atalho
-- **Grupos/combos**: monte conjuntos (café da manhã padrão, marmita, pré-treino) e lance tudo de uma vez
-- **Refeições**: cada registro entra numa refeição, com subtotais por refeição na tabela do dia
+- **Categorias**, **Favoritos**, **Recentes**, **Grupos/combos** e **Refeições** com subtotais
 
 ## Rodar localmente
 
@@ -28,40 +56,18 @@ python3 -m http.server 5173
 
 Acesse `http://localhost:5173`.
 
-## Publicar de graça (GitHub Pages)
+## Publicar (GitHub Pages)
 
-```bash
-gh repo create dieta-tracker --public --source . --push
-gh api -X POST repos/:owner/dieta-tracker/pages -f "source[branch]=main" -f "source[path]=/"
-```
-
-O site fica em `https://SEU_USUARIO.github.io/dieta-tracker/`.
+O repositório já está em `https://matheushbps.github.io/dieta-tracker/`. Após alterar `js/config.js`, faça push em `main`.
 
 ## Instalar no iOS
 
-Abra o site no Safari → botão Compartilhar → **Adicionar à Tela de Início**. O app abre em tela cheia e funciona offline.
+Safari → Compartilhar → **Adicionar à Tela de Início**.
 
 ## Banco de alimentos
 
-Seed pequeno em `data/foods.seed.json`. Amplie na aba **Banco**:
+Catálogo grande em `data/foods.cloud.json` (somente leitura). Alimentos próprios, favoritos e edições ficam no estado sincronizado do usuário.
 
-1. Formulário **Adicionar alimento**
-2. **Importar texto** (colar TSV/CSV)
-3. **Importar arquivo** `.csv` / `.tsv` / `.json`
+## Backup manual
 
-Colunas aceitas: `Alimento, Porção, Carboidratos, Proteínas, Gorduras, Gorduras Sat, Fibras, Sódio, Açúcares, Carboidratos líquidos, Categoria`.
-
-### Converter Excel/CSV grande para JSON
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install openpyxl
-python tools/import_foods.py "/caminho/Dieta_banco_corrigido.csv" -o data/foods.imported.json
-```
-
-Depois use **Importar arquivo** na aba Banco e selecione o JSON gerado.
-
-## Dados
-
-Tudo fica no `localStorage` do dispositivo. Use **Exportar tudo** na aba Metas para backup e **Restaurar backup** em outro aparelho.
+Na aba **Metas**: **Exportar tudo** / **Restaurar / unir backup** (JSON). Continua útil mesmo com a nuvem.

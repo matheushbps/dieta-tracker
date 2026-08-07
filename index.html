@@ -18,12 +18,50 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=Manrope:wght@400;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./css/app.css?v=16" />
+    <link rel="stylesheet" href="./css/app.css?v=17" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" defer></script>
-    <script type="module" src="./js/app.js?v=16"></script>
+    <script type="module" src="./js/app.js?v=17"></script>
   </head>
   <body>
-    <div class="app">
+    <div id="authGate" class="auth-gate">
+      <div class="auth-card">
+        <h1>Dieta Tracker</h1>
+        <p id="authIntro">
+          Entre com seu e-mail para sincronizar PC e celular. Você receberá um link mágico —
+          sem senha.
+        </p>
+        <form id="authForm" class="auth-form">
+          <label>
+            E-mail
+            <input id="authEmail" type="email" required autocomplete="email" placeholder="voce@email.com" />
+          </label>
+          <button class="btn primary" type="submit">Enviar link de acesso</button>
+        </form>
+        <p id="authMessage" class="muted" role="status"></p>
+        <div id="authSetup" class="auth-setup">
+          <h2>Configuração do Supabase</h2>
+          <ol>
+            <li>Crie um projeto em <a href="https://supabase.com" target="_blank" rel="noopener">supabase.com</a></li>
+            <li>Rode o SQL de <code>supabase/schema.sql</code> no SQL Editor</li>
+            <li>Em Auth → URL Configuration, adicione a URL deste site nas Redirect URLs</li>
+            <li>Cole Project URL e anon key abaixo (ou em <code>js/config.js</code>)</li>
+          </ol>
+          <form id="configForm" class="auth-form">
+            <label>
+              Project URL
+              <input id="cfgUrl" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off" />
+            </label>
+            <label>
+              anon public key
+              <input id="cfgAnon" type="text" placeholder="eyJhbGciOi..." autocomplete="off" />
+            </label>
+            <button class="btn" type="submit">Salvar configuração</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div class="app locked" id="appRoot">
       <header class="hero">
         <h1>Dieta Tracker</h1>
         <p>
@@ -40,7 +78,9 @@
           <button class="tab" data-tab="grupos" type="button">Grupos</button>
           <button class="tab" data-tab="metas" type="button">Metas</button>
         </nav>
-        <div class="row">
+        <div class="row sync-row">
+          <span id="syncStatus" class="sync-pill" title="Status da sincronização">Local</span>
+          <button id="signOutBtn" class="btn ghost" type="button" hidden>Sair</button>
           <label style="min-width: 156px">
             Dia
             <input id="dateInput" type="date" />
@@ -338,12 +378,15 @@
             <button id="resetDayBtn" class="btn danger" type="button">Limpar dia atual</button>
           </div>
           <p class="muted" style="margin-bottom: 0">
-            Os dados ficam neste aparelho/navegador. Exporte um backup para levar a outro dispositivo.
+            Com login, os dados sincronizam na nuvem entre PC e celular. O backup JSON continua
+            disponível como cópia de segurança.
           </p>
         </div>
       </section>
 
-      <p class="footer-note">App independente · dados locais no dispositivo · funciona offline após o primeiro acesso.</p>
+      <p class="footer-note">
+        App independente · sincronização na nuvem (login) · cache local para uso offline.
+      </p>
     </div>
   </body>
 </html>
