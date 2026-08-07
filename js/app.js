@@ -50,6 +50,8 @@ const state = {
   groupSelectedFood: null,
   activeCategory: "Todas",
   quickFilter: "favoritos",
+  entrySort: null,
+  foodSort: { key: "name", dir: "asc" },
   charts: {},
   cloudReady: false,
 };
@@ -505,6 +507,38 @@ function renderStats() {
 
 /* ---------- render: registro do dia ---------- */
 
+const TEXT_SORT_KEYS = new Set(["name", "category", "meal", "fonte"]);
+
+function compareBy(a, b, key) {
+  if (TEXT_SORT_KEYS.has(key)) {
+    return String(a?.[key] ?? "").localeCompare(String(b?.[key] ?? ""), "pt", { numeric: true });
+  }
+  return num(a?.[key]) - num(b?.[key]);
+}
+
+function sortRows(rows, sort) {
+  if (!sort?.key) return rows;
+  const factor = sort.dir === "desc" ? -1 : 1;
+  return [...rows].sort((a, b) => compareBy(a, b, sort.key) * factor);
+}
+
+/** Primeiro clique: numérico começa do maior, texto do menor. */
+function nextSort(current, key) {
+  if (current?.key === key) {
+    return { key, dir: current.dir === "asc" ? "desc" : "asc" };
+  }
+  return { key, dir: TEXT_SORT_KEYS.has(key) ? "asc" : "desc" };
+}
+
+function paintSortHeaders(headId, attr, sort) {
+  const head = document.getElementById(headId);
+  if (!head) return;
+  head.querySelectorAll(`th[${attr}]`).forEach((th) => {
+    if (sort?.key === th.getAttribute(attr)) th.dataset.dir = sort.dir;
+    else th.removeAttribute("data-dir");
+  });
+}
+
 function renderEntries() {
   const body = document.getElementById("entriesBody");
   const entries = dayEntries();
@@ -521,9 +555,10 @@ function renderEntries() {
   }
 
   const ordered = [...MEALS, "Sem refeição"].filter((m) => buckets.has(m));
+  paintSortHeaders("entriesHead", "data-sort", state.entrySort);
   body.innerHTML = ordered
     .map((meal) => {
-      const rows = buckets.get(meal);
+      const rows = sortRows(buckets.get(meal), state.entrySort);
       const st = totals(rows);
       return `
         <tr class="meal-row">
@@ -593,9 +628,8 @@ function filteredFoods(text = "") {
 }
 
 function renderFoodTable() {
-  const list = filteredFoods(document.getElementById("foodFilter").value).sort((a, b) =>
-    a.name.localeCompare(b.name, "pt"),
-  );
+  const list = sortRows(filteredFoods(document.getElementById("foodFilter").value), state.foodSort);
+  paintSortHeaders("foodsHead", "data-fsort", state.foodSort);
   document.getElementById("foodCount").textContent = `${list.length} / ${state.foods.length} itens`;
   const body = document.getElementById("foodsBody");
   if (!list.length) {
@@ -1220,6 +1254,20 @@ function bindEvents() {
   });
 
   document.getElementById("foodFilter").addEventListener("input", renderFoodTable);
+
+  document.getElementById("entriesHead").addEventListener("click", (e) => {
+    const th = e.target.closest("th[data-sort]");
+    if (!th) return;
+    state.entrySort = nextSort(state.entrySort, th.dataset.sort);
+    renderEntries();
+  });
+
+  document.getElementById("foodsHead").addEventListener("click", (e) => {
+    const th = e.target.closest("th[data-fsort]");
+    if (!th) return;
+    state.foodSort = nextSort(state.foodSort, th.dataset.fsort);
+    renderFoodTable();
+  });
 
   document.getElementById("categoryChips").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-cat]");

@@ -428,6 +428,39 @@ th {
   z-index: 2;
 }
 
+th.sortable {
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+th.sortable:hover {
+  color: var(--accent-soft);
+  background: rgba(20, 34, 66, 0.98);
+}
+
+th.sortable::after {
+  content: "⇅";
+  margin-left: 6px;
+  font-size: 0.75em;
+  opacity: 0.35;
+}
+
+th.sortable[data-dir="asc"],
+th.sortable[data-dir="desc"] {
+  color: var(--accent-soft);
+}
+
+th.sortable[data-dir="asc"]::after {
+  content: "▲";
+  opacity: 1;
+}
+
+th.sortable[data-dir="desc"]::after {
+  content: "▼";
+  opacity: 1;
+}
+
 tr.meal-row td {
   background: rgba(79, 140, 255, 0.14);
   font-weight: 700;
