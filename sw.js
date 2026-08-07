@@ -1,17 +1,22 @@
-const CACHE = "dieta-tracker-v11";
+const CACHE = "dieta-tracker-v12";
 const ASSETS = [
   "./",
   "./index.html",
-  "./css/app.css?v=11",
-  "./js/app.js?v=11",
-  "./data/foods.seed.json",
-  "./data/foods.legacy.json",
+  "./css/app.css?v=12",
+  "./js/app.js?v=12",
+  "./data/foods.cloud.json",
   "./manifest.webmanifest",
   "./icons/icon.svg",
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting()));
+  event.waitUntil(
+    caches
+      .open(CACHE)
+      .then((cache) => cache.addAll(ASSETS))
+      .then(() => self.skipWaiting())
+      .catch(() => self.skipWaiting()),
+  );
 });
 
 self.addEventListener("activate", (event) => {

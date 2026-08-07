@@ -1,4 +1,4 @@
-const STORAGE_KEY = "dieta-tracker-v1";
+const STORAGE_KEY = "dieta-tracker-v2";
 
 const DEFAULT_GOALS = {
   weight: 84,
@@ -37,7 +37,11 @@ const CATEGORIES = [
 ];
 
 const state = {
+  cloudFoods: [],
+  customFoods: [],
   foods: [],
+  favorites: {},
+  hiddenIds: {},
   days: {},
   groups: [],
   goals: { ...DEFAULT_GOALS },
@@ -47,6 +51,7 @@ const state = {
   activeCategory: "Todas",
   quickFilter: "favoritos",
   charts: {},
+  cloudReady: false,
 };
 
 /* ---------- helpers ---------- */
@@ -180,11 +185,58 @@ function normalizeFood(raw) {
   };
 }
 
+function rebuildFoods() {
+  const byName = new Map();
+
+  for (const food of state.cloudFoods) {
+    if (state.hiddenIds[food.id]) continue;
+    byName.set(food.name.toLowerCase(), {
+      ...food,
+      favorite: Boolean(state.favorites[food.id] || state.favorites[food.name.toLowerCase()]),
+    });
+  }
+
+  for (const food of state.customFoods) {
+    if (state.hiddenIds[food.id]) continue;
+    const key = food.name.toLowerCase();
+    const base = byName.get(key) || {};
+    byName.set(key, {
+      ...base,
+      ...food,
+      favorite: Boolean(
+        food.favorite || state.favorites[food.id] || state.favorites[key] || base.favorite,
+      ),
+    });
+  }
+
+  state.foods = [...byName.values()];
+}
+
 function loadState() {
   try {
-    const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem("dieta-tracker-v1");
+    const data = JSON.parse(raw || "null");
     if (!data) return;
-    state.foods = Array.isArray(data.foods) ? data.foods.map(normalizeFood) : [];
+
+    const loadedFoods = Array.isArray(data.foods) ? data.foods.map(normalizeFood) : [];
+    state.favorites = data.favorites && typeof data.favorites === "object" ? { ...data.favorites } : {};
+    state.hiddenIds = data.hiddenIds && typeof data.hiddenIds === "object" ? { ...data.hiddenIds } : {};
+
+    for (const food of loadedFoods) {
+      if (food.favorite) state.favorites[food.id] = true;
+    }
+
+    // Persistência local: só personalizados (não o banco da nuvem)
+    const customs = Array.isArray(data.customFoods)
+      ? data.customFoods.map(normalizeFood)
+      : loadedFoods.filter((f) => !["cloud", "seed", "legacy"].includes(f.source));
+
+    // Se o usuário tinha importado o CSV inteiro localmente, descarta para não estourar quota
+    state.customFoods =
+      customs.length > 1500
+        ? customs.filter((f) => f.source === "manual" || f.favorite || state.favorites[f.id])
+        : customs;
+
     state.days = data.days && typeof data.days === "object" ? data.days : {};
     state.groups = Array.isArray(data.groups) ? data.groups : [];
     state.goals = { ...DEFAULT_GOALS, ...(data.goals || {}) };
@@ -198,58 +250,66 @@ function saveState() {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
-        foods: state.foods,
+        customFoods: state.customFoods,
+        favorites: state.favorites,
+        hiddenIds: state.hiddenIds,
         days: state.days,
         groups: state.groups,
         goals: state.goals,
       }),
     );
+    // limpa chave antiga grande, se existir
+    localStorage.removeItem("dieta-tracker-v1");
     return true;
   } catch (err) {
     console.error(err);
     const quota = err && (err.name === "QuotaExceededError" || err.code === 22);
     alert(
       quota
-        ? "Espaço do navegador insuficiente para salvar o banco. Exporte um backup JSON e limpe dados antigos, ou importe em partes menores."
+        ? "Espaço do navegador insuficiente para salvar. O banco grande fica na nuvem; salve só favoritos/itens próprios."
         : "Não foi possível salvar os dados neste navegador.",
     );
     return false;
   }
 }
 
-async function ensurePackagedFoods() {
-  const packs = ["./data/foods.seed.json", "./data/foods.legacy.json"];
-  let incoming = [];
-  for (const url of packs) {
-    try {
-      const res = await fetch(url);
-      if (!res.ok) continue;
-      const data = await res.json();
-      incoming = incoming.concat((Array.isArray(data) ? data : []).map(normalizeFood));
-    } catch {
-      /* pacote opcional */
+async function loadCloudDatabase() {
+  const status = document.getElementById("importStatus");
+  try {
+    if (status) status.textContent = "Carregando banco da nuvem…";
+    const res = await fetch("./data/foods.cloud.json", { cache: "force-cache" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    state.cloudFoods = (Array.isArray(data) ? data : []).map((f) =>
+      normalizeFood({ ...f, source: "cloud" }),
+    );
+    state.cloudReady = true;
+    rebuildFoods();
+    if (status) status.textContent = `Banco na nuvem: ${state.cloudFoods.length.toLocaleString("pt-BR")} alimentos.`;
+  } catch (err) {
+    console.error(err);
+    state.cloudFoods = [];
+    state.cloudReady = false;
+    // fallback local pequeno
+    for (const url of ["./data/foods.legacy.json", "./data/foods.seed.json"]) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) continue;
+        const data = await res.json();
+        state.cloudFoods = state.cloudFoods.concat(
+          (Array.isArray(data) ? data : []).map((f) => normalizeFood({ ...f, source: f.source || "seed" })),
+        );
+      } catch {
+        /* ignore */
+      }
+    }
+    rebuildFoods();
+    if (status) {
+      status.textContent = state.cloudFoods.length
+        ? `Fallback local: ${state.cloudFoods.length} alimentos.`
+        : "Não foi possível carregar o banco da nuvem.";
     }
   }
-  if (!incoming.length) {
-    if (!state.foods.length) state.foods = [];
-    return;
-  }
-
-  if (!state.foods.length) {
-    state.foods = incoming;
-    saveState();
-    return;
-  }
-
-  const existing = new Set(state.foods.map((f) => f.name.toLowerCase()));
-  let added = 0;
-  for (const food of incoming) {
-    if (!food.name || existing.has(food.name.toLowerCase())) continue;
-    state.foods.push({ ...food, id: food.id || slug(food.name) });
-    existing.add(food.name.toLowerCase());
-    added++;
-  }
-  if (added) saveState();
 }
 
 function dayEntries() {
@@ -884,7 +944,7 @@ function parseDelimited(text) {
 }
 
 function upsertFoods(incoming) {
-  const byName = new Map(state.foods.map((f) => [f.name.toLowerCase(), f]));
+  const byName = new Map(state.customFoods.map((f) => [f.name.toLowerCase(), f]));
   let added = 0;
   let updated = 0;
 
@@ -897,16 +957,24 @@ function upsertFoods(incoming) {
         id: existing.id,
         favorite: existing.favorite,
         category: food.category && food.category !== "Outros" ? food.category : existing.category,
+        source: existing.source === "manual" ? "manual" : food.source || existing.source,
       });
       updated++;
     } else {
-      const created = { ...food, id: food.id || slug(food.name) };
-      state.foods.push(created);
+      const cloud = state.cloudFoods.find((f) => f.name.toLowerCase() === key);
+      const created = {
+        ...(cloud || {}),
+        ...food,
+        id: food.id || cloud?.id || slug(food.name),
+        source: food.source || "manual",
+      };
+      state.customFoods.push(created);
       byName.set(key, created);
       added++;
     }
   }
 
+  rebuildFoods();
   const saved = saveState();
   return { added, updated, saved };
 }
@@ -1167,7 +1235,12 @@ function bindEvents() {
     if (fav) {
       const food = state.foods.find((f) => f.id === fav.dataset.fav);
       if (food) {
-        food.favorite = !food.favorite;
+        const next = !food.favorite;
+        food.favorite = next;
+        if (next) state.favorites[food.id] = true;
+        else delete state.favorites[food.id];
+        const custom = state.customFoods.find((f) => f.id === food.id || f.name.toLowerCase() === food.name.toLowerCase());
+        if (custom) custom.favorite = next;
         saveState();
         renderCategoryChips();
         renderFoodTable();
@@ -1176,8 +1249,15 @@ function bindEvents() {
       return;
     }
     const del = e.target.closest("[data-delfood]");
-    if (del && confirm("Apagar este alimento do banco?")) {
-      state.foods = state.foods.filter((f) => f.id !== del.dataset.delfood);
+    if (del && confirm("Remover este alimento da sua lista?")) {
+      const id = del.dataset.delfood;
+      const food = state.foods.find((f) => f.id === id);
+      state.customFoods = state.customFoods.filter((f) => f.id !== id);
+      if (food?.source === "cloud" || state.cloudFoods.some((f) => f.id === id)) {
+        state.hiddenIds[id] = true;
+      }
+      delete state.favorites[id];
+      rebuildFoods();
       saveState();
       renderAll();
     }
@@ -1189,7 +1269,7 @@ function bindEvents() {
     const food = state.foods.find((f) => f.id === sel.dataset.catFor);
     if (!food) return;
     food.category = sel.value;
-    saveState();
+    upsertFoods([{ ...food, category: sel.value, source: food.source === "cloud" ? "manual" : food.source }]);
     renderCategoryChips();
   });
 
@@ -1342,7 +1422,9 @@ function bindEvents() {
 
   document.getElementById("exportAllBtn").addEventListener("click", () => {
     downloadJSON(`dieta-backup-${todayISO()}.json`, {
-      foods: state.foods,
+      customFoods: state.customFoods,
+      favorites: state.favorites,
+      hiddenIds: state.hiddenIds,
       days: state.days,
       groups: state.groups,
       goals: state.goals,
@@ -1354,10 +1436,18 @@ function bindEvents() {
     if (!file) return;
     try {
       const data = JSON.parse(await file.text());
-      if (Array.isArray(data.foods)) state.foods = data.foods.map(normalizeFood);
+      if (Array.isArray(data.customFoods)) state.customFoods = data.customFoods.map(normalizeFood);
+      else if (Array.isArray(data.foods)) {
+        state.customFoods = data.foods
+          .map(normalizeFood)
+          .filter((f) => !["cloud", "seed", "legacy"].includes(f.source));
+      }
+      if (data.favorites && typeof data.favorites === "object") state.favorites = data.favorites;
+      if (data.hiddenIds && typeof data.hiddenIds === "object") state.hiddenIds = data.hiddenIds;
       if (data.days && typeof data.days === "object") state.days = data.days;
       if (Array.isArray(data.groups)) state.groups = data.groups;
       if (data.goals) state.goals = { ...DEFAULT_GOALS, ...data.goals };
+      rebuildFoods();
       saveState();
       fillGoalsForm();
       renderAll();
@@ -1395,10 +1485,12 @@ function bindEvents() {
 
 async function init() {
   loadState();
-  await ensurePackagedFoods();
   fillSelects();
   fillGoalsForm();
   bindEvents();
+  rebuildFoods();
+  renderAll();
+  await loadCloudDatabase();
   renderAll();
 
   if ("serviceWorker" in navigator) {
