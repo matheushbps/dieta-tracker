@@ -91,6 +91,22 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+function searchKey(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function matchesSearch(value, query) {
+  const searchable = searchKey(value);
+  const terms = searchKey(query).split(" ").filter(Boolean);
+  return terms.every((term) => searchable.includes(term));
+}
+
 function kcalOf({ carbs, protein, fat }) {
   return carbs * 4 + protein * 4 + fat * 9;
 }
@@ -139,15 +155,27 @@ function loadState() {
 }
 
 function saveState() {
-  localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify({
-      foods: state.foods,
-      days: state.days,
-      groups: state.groups,
-      goals: state.goals,
-    }),
-  );
+  try {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        foods: state.foods,
+        days: state.days,
+        groups: state.groups,
+        goals: state.goals,
+      }),
+    );
+    return true;
+  } catch (err) {
+    console.error(err);
+    const quota = err && (err.name === "QuotaExceededError" || err.code === 22);
+    alert(
+      quota
+        ? "Espaço do navegador insuficiente para salvar o banco. Exporte um backup JSON e limpe dados antigos, ou importe em partes menores."
+        : "Não foi possível salvar os dados neste navegador.",
+    );
+    return false;
+  }
 }
 
 async function ensureSeedFoods() {
@@ -433,9 +461,9 @@ function renderCategoryChips() {
 }
 
 function filteredFoods(text = "") {
-  const q = text.trim().toLowerCase();
+  const q = searchKey(text);
   return state.foods.filter((food) => {
-    if (q && !food.name.toLowerCase().includes(q)) return false;
+    if (q && !matchesSearch(food.name, q)) return false;
     if (state.activeCategory === "★") return food.favorite;
     if (state.activeCategory !== "Todas" && food.category !== state.activeCategory) return false;
     return true;
@@ -511,14 +539,14 @@ function renderQuickChips() {
 
 function renderSuggestions(query, boxId, onPickAttr) {
   const box = document.getElementById(boxId);
-  const q = query.trim().toLowerCase();
+  const q = searchKey(query);
   if (!q) {
     box.classList.add("hidden");
     box.innerHTML = "";
     return;
   }
   const hits = state.foods
-    .filter((f) => f.name.toLowerCase().includes(q))
+    .filter((f) => matchesSearch(f.name, q))
     .sort((a, b) => Number(b.favorite) - Number(a.favorite) || a.name.length - b.name.length)
     .slice(0, 14);
   if (!hits.length) {
@@ -547,6 +575,16 @@ function selectFood(food) {
   document.getElementById("qtyInput").value = String(food.portion);
   document.getElementById("foodSearch").value = food.name;
   document.getElementById("suggestions").classList.add("hidden");
+}
+
+function clearFoodSelection() {
+  state.selectedFood = null;
+  document.getElementById("foodSearch").value = "";
+  document.getElementById("qtyInput").value = "";
+  document.getElementById("portionHint").value = "";
+  document.getElementById("selectedFoodLabel").textContent = "Nenhum alimento selecionado.";
+  document.getElementById("suggestions").classList.add("hidden");
+  document.getElementById("suggestions").innerHTML = "";
 }
 
 /* ---------- grupos ---------- */
@@ -741,21 +779,59 @@ function parseDelimited(text) {
 }
 
 function upsertFoods(incoming) {
+  const byName = new Map(state.foods.map((f) => [f.name.toLowerCase(), f]));
   let added = 0;
   let updated = 0;
+
   for (const food of incoming) {
     if (!food.name) continue;
-    const idx = state.foods.findIndex((f) => f.name.toLowerCase() === food.name.toLowerCase());
-    if (idx >= 0) {
-      state.foods[idx] = { ...state.foods[idx], ...food, id: state.foods[idx].id, favorite: state.foods[idx].favorite };
+    const key = food.name.toLowerCase();
+    const existing = byName.get(key);
+    if (existing) {
+      Object.assign(existing, food, {
+        id: existing.id,
+        favorite: existing.favorite,
+        category: food.category && food.category !== "Outros" ? food.category : existing.category,
+      });
       updated++;
     } else {
-      state.foods.push({ ...food, id: food.id || slug(food.name) });
+      const created = { ...food, id: food.id || slug(food.name) };
+      state.foods.push(created);
+      byName.set(key, created);
       added++;
     }
   }
-  saveState();
-  return { added, updated };
+
+  const saved = saveState();
+  return { added, updated, saved };
+}
+
+async function readTextFile(file) {
+  const buffer = await file.arrayBuffer();
+  const utf8 = new TextDecoder("utf-8").decode(buffer);
+  if (!utf8.includes("\uFFFD")) return utf8;
+  // Excel no Windows costuma salvar CSV em Windows-1252
+  try {
+    return new TextDecoder("windows-1252").decode(buffer);
+  } catch {
+    return utf8;
+  }
+}
+
+function reportImport(result, label = "Importação") {
+  const status = document.getElementById("importStatus");
+  if (!result || !(result.added + result.updated)) {
+    status.textContent = `${label}: nenhum alimento encontrado no arquivo.`;
+    return;
+  }
+  const saveNote = result.saved === false ? " (atenção: não salvou no navegador)" : "";
+  status.textContent = `${label}: ${result.added} novos, ${result.updated} atualizados. Total no banco: ${state.foods.length}.${saveNote}`;
+  state.activeCategory = "Todas";
+  const filter = document.getElementById("foodFilter");
+  if (filter) filter.value = "";
+  switchTab("banco");
+  renderAll();
+  alert(`${label} concluída.\n${result.added} novos · ${result.updated} atualizados\nTotal no banco: ${state.foods.length}\n\nOs dados ficam só neste navegador/dispositivo. Em outro PC ou no iPhone, importe de novo (ou restaure um backup).`);
 }
 
 function downloadJSON(filename, data) {
@@ -957,6 +1033,7 @@ function bindEvents() {
       meal: document.getElementById("mealSelect").value,
       ...scaleFood(food, qty),
     });
+    clearFoodSelection();
     saveState();
     renderAll();
   });
@@ -1030,31 +1107,32 @@ function bindEvents() {
       return;
     }
     const r = upsertFoods(foods);
-    document.getElementById("importStatus").textContent = `Importados: ${r.added} novos, ${r.updated} atualizados.`;
     document.getElementById("importPaste").value = "";
-    renderAll();
+    reportImport(r, "Texto");
   });
 
   document.getElementById("importFile").addEventListener("change", async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const text = await file.text();
+    document.getElementById("importStatus").textContent = `Lendo ${file.name}…`;
     let foods = [];
     try {
-      if (file.name.endsWith(".json")) {
+      const text = await readTextFile(file);
+      if (file.name.toLowerCase().endsWith(".json")) {
         const data = JSON.parse(text);
         foods = (Array.isArray(data) ? data : data.foods || []).map(normalizeFood);
       } else {
         foods = parseDelimited(text);
       }
-    } catch {
-      document.getElementById("importStatus").textContent = "Arquivo inválido.";
+    } catch (err) {
+      console.error(err);
+      document.getElementById("importStatus").textContent = "Arquivo inválido ou ilegível.";
+      e.target.value = "";
       return;
     }
     const r = upsertFoods(foods);
-    document.getElementById("importStatus").textContent = `Arquivo: ${r.added} novos, ${r.updated} atualizados.`;
     e.target.value = "";
-    renderAll();
+    reportImport(r, file.name);
   });
 
   document.getElementById("exportFoodsBtn").addEventListener("click", () => {
