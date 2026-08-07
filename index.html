@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#060b18" />
+    <meta name="description" content="Controle diário de calorias, macros, fibras, gordura saturada, sódio e açúcares." />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Dieta" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Dieta Tracker</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icons/icon-180.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=Manrope:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./css/app.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" defer></script>
+    <script type="module" src="./js/app.js"></script>
+  </head>
+  <body>
+    <div class="app">
+      <header class="hero">
+        <h1>Dieta Tracker</h1>
+        <p>
+          Calorias, macros, fibras, gordura saturada, sódio, carboidratos líquidos e açúcares —
+          com metas por peso, agrupamento de alimentos e gráficos.
+        </p>
+      </header>
+
+      <div class="topbar">
+        <nav class="tabs" role="tablist" aria-label="Seções">
+          <button class="tab active" data-tab="hoje" type="button">Hoje</button>
+          <button class="tab" data-tab="graficos" type="button">Gráficos</button>
+          <button class="tab" data-tab="banco" type="button">Banco</button>
+          <button class="tab" data-tab="grupos" type="button">Grupos</button>
+          <button class="tab" data-tab="metas" type="button">Metas</button>
+        </nav>
+        <div class="row">
+          <label style="min-width: 156px">
+            Dia
+            <input id="dateInput" type="date" />
+          </label>
+        </div>
+      </div>
+
+      <section id="tab-hoje" class="stack">
+        <div class="panel">
+          <h2>Resumo do dia</h2>
+          <div class="summary-groups">
+            <div class="summary-block">
+              <p class="block-title">Energia</p>
+              <div id="statsEnergia" class="grid-stats"></div>
+            </div>
+            <div class="summary-block">
+              <p class="block-title">Macronutrientes</p>
+              <div id="statsMacros" class="grid-stats"></div>
+            </div>
+            <div class="summary-block">
+              <p class="block-title">Qualidade da dieta</p>
+              <div id="statsQualidade" class="grid-stats"></div>
+            </div>
+            <div class="summary-block">
+              <p class="block-title">Por quilo de peso</p>
+              <div id="statsPorKg" class="grid-stats"></div>
+            </div>
+          </div>
+          <div class="row" style="margin-top: 12px">
+            <span class="pill" id="weightPill">Peso: —</span>
+            <span class="pill" id="satPill">GS: —</span>
+            <span class="pill" id="fiberPill">Fibra: —</span>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Adicionar alimento</h2>
+          <div class="row" style="margin-bottom: 10px">
+            <div id="quickChips" class="chips"></div>
+          </div>
+          <div class="form-grid">
+            <label class="search-wrap" style="grid-column: 1 / -1">
+              Buscar no banco
+              <input id="foodSearch" type="search" placeholder="Digite o nome do alimento…" autocomplete="off" />
+              <div id="suggestions" class="suggestions hidden"></div>
+            </label>
+            <label>
+              Porção consumida
+              <input id="qtyInput" type="number" min="0" step="0.1" value="100" />
+            </label>
+            <label>
+              Porção base do banco
+              <input id="portionHint" type="text" readonly />
+            </label>
+            <label>
+              Refeição
+              <select id="mealSelect"></select>
+            </label>
+            <div class="row" style="align-items: end">
+              <button id="addEntryBtn" class="btn primary" type="button">Adicionar ao dia</button>
+            </div>
+          </div>
+          <p class="muted" id="selectedFoodLabel" style="margin: 10px 0 0">Nenhum alimento selecionado.</p>
+        </div>
+
+        <div class="panel">
+          <div class="row" style="justify-content: space-between; margin-bottom: 10px">
+            <h2 style="margin: 0">Registro do dia</h2>
+            <div class="row">
+              <button id="saveGroupBtn" class="btn" type="button">Salvar dia como grupo</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Alimento</th>
+                  <th>Qtd</th>
+                  <th>kcal</th>
+                  <th>Carb</th>
+                  <th>Prot</th>
+                  <th>Gord</th>
+                  <th>GS</th>
+                  <th>Fibra</th>
+                  <th>Na</th>
+                  <th>Líq</th>
+                  <th>Açúc</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="entriesBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Grupos salvos (adicionar rápido)</h3>
+          <div id="quickGroups" class="chips"></div>
+        </div>
+      </section>
+
+      <section id="tab-graficos" class="stack hidden">
+        <div class="panel">
+          <h2>Macros e fibras (14 dias)</h2>
+          <div class="chart-box">
+            <canvas id="macrosChart"></canvas>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>Calorias vs meta</h2>
+          <div class="chart-box">
+            <canvas id="kcalChart"></canvas>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>Gordura saturada, sódio e fibras</h2>
+          <div class="chart-box">
+            <canvas id="qualityChart"></canvas>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-banco" class="stack hidden">
+        <div class="panel">
+          <h2>Banco de alimentos</h2>
+          <p class="muted" style="margin-top: 0">
+            Seed pequeno incluso. Amplie pelo formulário, colando TSV/CSV ou importando arquivo.
+          </p>
+          <div class="row" style="margin-bottom: 10px">
+            <label style="flex: 1; min-width: 180px">
+              Filtrar por nome
+              <input id="foodFilter" type="search" placeholder="Filtrar banco…" />
+            </label>
+            <span class="pill" id="foodCount">0 itens</span>
+          </div>
+          <div id="categoryChips" class="chips" style="margin-bottom: 12px"></div>
+          <div class="table-wrap" style="max-height: 380px">
+            <table>
+              <thead>
+                <tr>
+                  <th>★</th>
+                  <th>Alimento</th>
+                  <th>Categoria</th>
+                  <th>Porção</th>
+                  <th>Carb</th>
+                  <th>Prot</th>
+                  <th>Gord</th>
+                  <th>GS</th>
+                  <th>Fibra</th>
+                  <th>Na</th>
+                  <th>Açúc</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="foodsBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Adicionar alimento</h3>
+          <form id="foodForm" class="form-grid">
+            <label>Nome <input name="name" required /></label>
+            <label>Categoria <select name="category" id="foodFormCategory"></select></label>
+            <label>Porção base <input name="portion" type="number" step="0.1" value="100" required /></label>
+            <label>Carboidratos (g) <input name="carbs" type="number" step="0.01" value="0" /></label>
+            <label>Proteínas (g) <input name="protein" type="number" step="0.01" value="0" /></label>
+            <label>Gorduras (g) <input name="fat" type="number" step="0.01" value="0" /></label>
+            <label>Gord. saturada (g) <input name="satFat" type="number" step="0.01" value="0" /></label>
+            <label>Fibras (g) <input name="fiber" type="number" step="0.01" value="0" /></label>
+            <label>Sódio (mg) <input name="sodium" type="number" step="0.01" value="0" /></label>
+            <label>Açúcares adicionados (g) <input name="addedSugar" type="number" step="0.01" value="0" /></label>
+            <div class="row" style="align-items: end">
+              <button class="btn primary" type="submit">Salvar no banco</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="panel">
+          <h3>Importar em massa</h3>
+          <p class="muted">
+            Colunas aceitas:
+            <code>Alimento, Porção, Carboidratos, Proteínas, Gorduras, Gorduras Sat, Fibras, Sódio, Açúcares, Categoria</code>
+          </p>
+          <textarea id="importPaste" placeholder="Cole aqui…&#10;Arroz branco cozido,120,33.6,3.2,0.4,0.1,0.5,1.2,0,Carboidratos"></textarea>
+          <div class="row" style="margin-top: 10px">
+            <button id="importPasteBtn" class="btn primary" type="button">Importar texto</button>
+            <label class="btn" style="cursor: pointer">
+              Importar arquivo
+              <input id="importFile" type="file" accept=".csv,.tsv,.txt,.json" hidden />
+            </label>
+            <button id="exportFoodsBtn" class="btn" type="button">Exportar banco JSON</button>
+          </div>
+          <p class="muted" id="importStatus" style="margin-bottom: 0"></p>
+        </div>
+      </section>
+
+      <section id="tab-grupos" class="stack hidden">
+        <div class="panel">
+          <h2>Grupos de alimentos</h2>
+          <p class="muted" style="margin-top: 0">
+            Monte combinações (café da manhã padrão, marmita, pré-treino) e adicione tudo com um clique.
+          </p>
+          <div class="form-grid">
+            <label style="grid-column: 1 / -1">
+              Nome do grupo
+              <input id="newGroupName" type="text" placeholder="Ex.: Café da manhã padrão" />
+            </label>
+            <div class="row" style="align-items: end">
+              <button id="createGroupBtn" class="btn primary" type="button">Criar grupo vazio</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Adicionar item a um grupo</h3>
+          <div class="form-grid">
+            <label>
+              Grupo
+              <select id="groupTarget"></select>
+            </label>
+            <label class="search-wrap">
+              Alimento
+              <input id="groupFoodSearch" type="search" placeholder="Buscar…" autocomplete="off" />
+              <div id="groupSuggestions" class="suggestions hidden"></div>
+            </label>
+            <label>
+              Quantidade
+              <input id="groupQty" type="number" min="0" step="0.1" value="100" />
+            </label>
+            <div class="row" style="align-items: end">
+              <button id="addToGroupBtn" class="btn primary" type="button">Adicionar ao grupo</button>
+            </div>
+          </div>
+          <p class="muted" id="groupSelectedLabel" style="margin: 10px 0 0">Nenhum alimento selecionado.</p>
+        </div>
+
+        <div class="panel">
+          <h3>Meus grupos</h3>
+          <div id="groupsList" class="group-list"></div>
+        </div>
+      </section>
+
+      <section id="tab-metas" class="stack hidden">
+        <div class="panel">
+          <h2>Peso e metas</h2>
+          <form id="goalsForm" class="form-grid">
+            <label>Peso corporal (kg) <input name="weight" type="number" step="0.1" min="1" required /></label>
+            <label>Meta calorias (kcal) <input name="kcal" type="number" step="1" min="0" /></label>
+            <label>Carb / kg <input name="carbPerKg" type="number" step="0.01" min="0" /></label>
+            <label>Prot / kg <input name="proteinPerKg" type="number" step="0.01" min="0" /></label>
+            <label>Gord / kg <input name="fatPerKg" type="number" step="0.01" min="0" /></label>
+            <label>Limite gord. saturada (g) <input name="satFatLimit" type="number" step="0.1" min="0" /></label>
+            <label>Meta fibras (g) <input name="fiberGoal" type="number" step="0.1" min="0" /></label>
+            <label>Meta fibras / 1000 kcal <input name="fiberPer1000" type="number" step="0.1" min="0" /></label>
+            <label>Limite sódio (mg) <input name="sodiumLimit" type="number" step="1" min="0" /></label>
+            <label>Limite açúcar adicionado (g) <input name="addedSugarLimit" type="number" step="0.1" min="0" /></label>
+            <div class="row" style="align-items: end">
+              <button class="btn primary" type="submit">Salvar metas</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="panel">
+          <h3>Backup dos dados</h3>
+          <div class="row">
+            <button id="exportAllBtn" class="btn" type="button">Exportar tudo</button>
+            <label class="btn" style="cursor: pointer">
+              Restaurar backup
+              <input id="importAllFile" type="file" accept=".json" hidden />
+            </label>
+            <button id="resetDayBtn" class="btn danger" type="button">Limpar dia atual</button>
+          </div>
+          <p class="muted" style="margin-bottom: 0">
+            Os dados ficam neste aparelho/navegador. Exporte um backup para levar a outro dispositivo.
+          </p>
+        </div>
+      </section>
+
+      <p class="footer-note">App independente · dados locais no dispositivo · funciona offline após o primeiro acesso.</p>
+    </div>
+  </body>
+</html>
