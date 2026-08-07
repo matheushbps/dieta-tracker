@@ -217,16 +217,39 @@ function saveState() {
   }
 }
 
-async function ensureSeedFoods() {
-  if (state.foods.length) return;
-  try {
-    const res = await fetch("./data/foods.seed.json");
-    if (!res.ok) throw new Error("seed indisponível");
-    state.foods = (await res.json()).map(normalizeFood);
-    saveState();
-  } catch {
-    state.foods = [];
+async function ensurePackagedFoods() {
+  const packs = ["./data/foods.seed.json", "./data/foods.legacy.json"];
+  let incoming = [];
+  for (const url of packs) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const data = await res.json();
+      incoming = incoming.concat((Array.isArray(data) ? data : []).map(normalizeFood));
+    } catch {
+      /* pacote opcional */
+    }
   }
+  if (!incoming.length) {
+    if (!state.foods.length) state.foods = [];
+    return;
+  }
+
+  if (!state.foods.length) {
+    state.foods = incoming;
+    saveState();
+    return;
+  }
+
+  const existing = new Set(state.foods.map((f) => f.name.toLowerCase()));
+  let added = 0;
+  for (const food of incoming) {
+    if (!food.name || existing.has(food.name.toLowerCase())) continue;
+    state.foods.push({ ...food, id: food.id || slug(food.name) });
+    existing.add(food.name.toLowerCase());
+    added++;
+  }
+  if (added) saveState();
 }
 
 function dayEntries() {
@@ -1370,7 +1393,7 @@ function bindEvents() {
 
 async function init() {
   loadState();
-  await ensureSeedFoods();
+  await ensurePackagedFoods();
   fillSelects();
   fillGoalsForm();
   bindEvents();
