@@ -443,7 +443,20 @@ function renderEntries() {
       const rows = buckets.get(meal);
       const st = totals(rows);
       return `
-        <tr class="meal-row"><td colspan="12">${escapeHtml(meal)} · ${round(st.kcal, 0)} kcal</td></tr>
+        <tr class="meal-row">
+          <td>${escapeHtml(meal)}</td>
+          <td>${rows.length}</td>
+          <td>${round(st.kcal, 0)}</td>
+          <td>${round(st.carbs)}</td>
+          <td>${round(st.protein)}</td>
+          <td>${round(st.fat)}</td>
+          <td>${round(st.satFat)}</td>
+          <td>${round(st.fiber)}</td>
+          <td>${round(st.sodium, 0)}</td>
+          <td>${round(st.netCarbs)}</td>
+          <td>${round(st.addedSugar)}</td>
+          <td></td>
+        </tr>
         ${rows
           .map(
             (e) => `
@@ -462,20 +475,7 @@ function renderEntries() {
             <td><button class="btn ghost" data-del="${e.id}" type="button">Remover</button></td>
           </tr>`,
           )
-          .join("")}
-        <tr class="subtotal">
-          <td>Subtotal</td><td></td>
-          <td>${round(st.kcal, 0)}</td>
-          <td>${round(st.carbs)}</td>
-          <td>${round(st.protein)}</td>
-          <td>${round(st.fat)}</td>
-          <td>${round(st.satFat)}</td>
-          <td>${round(st.fiber)}</td>
-          <td>${round(st.sodium, 0)}</td>
-          <td>${round(st.netCarbs)}</td>
-          <td>${round(st.addedSugar)}</td>
-          <td></td>
-        </tr>`;
+          .join("")}`;
     })
     .join("");
 }
